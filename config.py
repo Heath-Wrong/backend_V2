@@ -2,7 +2,7 @@ import os
 class Config:
     API_KEY, API_SECRET = 'YOUR_API_KEY', 'YOUR_API_SECRET'
 
-    basedir = 'd:/SV/SV_sys/backend_V2'
+    basedir = '/workspace/backend_V2/backend_V2/'
     
     # 数据库连接池配置
     DB_POOL_SIZE = 5
