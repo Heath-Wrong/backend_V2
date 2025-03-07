@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from database.db_operations import createFeature, createGroup, deleteFeature, queryFeatureList, searchFea, searchScoreFea, updateFeature, deleteGroup
+from database.db_operations import createFeature, createGroup, deleteFeature, queryFeatureList, searchFea, searchScoreFea, updateFeature, deleteGroup, queryGroupList
 from config import Config
 from auth.verify import verify_auth
 
@@ -41,5 +41,9 @@ def handle_request():
         return updateFeature(data)
     elif api_name == 'deleteGroup':
         return deleteGroup(data)
+    elif api_name == 'verifyKey':
+        return jsonify({'message': 'success'}), 200
+    elif api_name == 'queryGroupList':
+        return queryGroupList(data)
     else:
         return jsonify({'error': 'Unsupported API'}), 400

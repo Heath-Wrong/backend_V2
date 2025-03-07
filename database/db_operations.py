@@ -146,6 +146,22 @@ def updateFeature(data):
         db.rollback()
         return jsonify({'error': str(e)}), 500
     
+def queryGroupList(data):
+    try:
+        groups = Group.query.all()
+        groups = [{'groupId': g.group_id, 'groupName': g.group_name} for g in groups]
+        code = 0
+        message = "success"
+        text = base64.b64encode(json.dumps(groups).encode('utf-8')).decode('utf-8')
+        payload = {
+            "queryGroupListRes": {
+                "text": text
+            }
+        }
+        return build_response(code, message, payload)
+    except SQLAlchemyError as e:
+        return jsonify({'error': str(e)}), 500
+
 def queryFeatureList(data):
     try:
         group_id = data['parameter']['s782b4996']['groupId']
