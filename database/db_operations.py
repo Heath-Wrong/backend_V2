@@ -7,7 +7,7 @@ from .init_db import Group, Feature, db
 from utils import VoiceProcessor
 import tempfile
 import pickle
-
+import os
 def build_response(code, message, payload):
     # 新增响应构建器
     return jsonify({
@@ -19,8 +19,25 @@ def build_response(code, message, payload):
         "payload": payload
     })
 
+def check_required_params(data, required_params):
+    """
+    检查请求中是否包含必要的参数
+    :param data: 请求数据
+    :param required_params: 必要的参数列表
+    :return: 如果缺少参数，返回错误信息；否则返回None
+    """
+    missing_params = [param for param in required_params if param not in data.get('parameter', {}).get('s782b4996', {})]
+    if missing_params:
+        return build_response(1, f"Missing required parameters: {', '.join(missing_params)}", {})
+    return None
+
 def createGroup(data):
     # 处理createGroup请求
+    required_params = ['groupId', 'groupName']
+    error_response = check_required_params(data, required_params)
+    if error_response:
+        return error_response
+
     try:
         parameter = data['parameter']['s782b4996']
         new_group = Group(
@@ -45,31 +62,34 @@ def createGroup(data):
         }
         return build_response(code, message, payload)
     except SQLAlchemyError as e:
-        db.rollback()
-        message = "fail"
-        code    = 1
-        return jsonify({'error': str(e)}), 500
+        db.session.rollback()
+        return build_response(1, f"Database error: {str(e)}", {})
 
 def createFeature(data):
+    required_params = ['groupId', 'featureId']
+    error_response = check_required_params(data, required_params)
+    if error_response:
+        return error_response
+
     try:
         parameter = data['parameter']['s782b4996']
-        load_data    = data['payload']['resource']
-        #以下的参数留作后用
-        encoding     = load_data['encoding']#暂时固定为lame
-        sample_rate  = load_data['sample_rate']#暂时固定为16000
-        channels     = load_data['channels']#暂时固定为1
-        bit_depth    = load_data['bit_depth']
-        audio_data   = load_data['audio']
+        group_id = parameter['groupId']
 
-        audio_bytes  = base64.b64decode(load_data['audio'])
-        # 将 audio_bytes 保存为临时文件
+        # 检查 group_id 是否存在
+        group = Group.query.filter_by(group_id=group_id).first()
+        if not group:
+            return build_response(1, f"Group with ID {group_id} does not exist", {})
+
+        load_data = data['payload']['resource']
+        audio_bytes = base64.b64decode(load_data['audio'])
+
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio_file:
             temp_audio_file.write(audio_bytes)
             temp_audio_path = temp_audio_file.name
-        
+
         feature = VoiceProcessor(Config.MODEL_PATH).extract_feature(temp_audio_path)
         new_feature = Feature(
-            group_id     = parameter['groupId'],
+            group_id     = group_id,
             feature_id   = parameter['featureId'],
             feature_info = parameter.get('featureInfo'),
             feature      = pickle.dumps(feature)
@@ -80,7 +100,7 @@ def createFeature(data):
         message = "success"
         code = 0
         text_origin = {
-            "groupId": parameter['groupId'],
+            "groupId": group_id,
             "featureId": parameter['featureId'],
             "featureInfo": parameter.get('featureInfo')
         }
@@ -90,61 +110,117 @@ def createFeature(data):
                 "text": text
             }
         }
+        os.unlink(temp_audio_path)  # 删除临时文件
         return build_response(code, message, payload)
     except SQLAlchemyError as e:
-        db.rollback()
-        return jsonify({'error': str(e)}), 500
-    
+        db.session.rollback()
+        return build_response(1, f"Database error: {str(e)}", {})
 
 
 def updateFeature(data):
+    required_params = ['groupId', 'featureId']
+    error_response = check_required_params(data, required_params)
+    if error_response:
+        return error_response
+
     try:
         parameter = data['parameter']['s782b4996']
-        load_data    = data['payload']['resource']
-        #以下的参数留作后用
-        encoding     = load_data['encoding']#暂时固定为lame
-        sample_rate  = load_data['sample_rate']#暂时固定为16000
-        channels     = load_data['channels']#暂时固定为1
-        bit_depth    = load_data['bit_depth']
-        audio_data   = load_data['audio']
+        load_data = data['payload']['resource']
+        audio_bytes = base64.b64decode(load_data['audio'])
 
-        # 查询要更新的特征记录
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio_file:
+            temp_audio_file.write(audio_bytes)
+            temp_audio_path = temp_audio_file.name
+
+        feature = VoiceProcessor(Config.MODEL_PATH).extract_feature(temp_audio_path)
         existing_feature = Feature.query.filter_by(
             group_id=parameter['groupId'],
             feature_id=parameter['featureId']
         ).first()
 
-        if existing_feature:
-            # 更新特征记录的属性
+        if not existing_feature:
+            return build_response(1, "Feature not found", {})
 
-            audio_bytes  = base64.b64decode(load_data['audio'])
-            # 将 audio_bytes 保存为临时文件
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio_file:
-                temp_audio_file.write(audio_bytes)
-                temp_audio_path = temp_audio_file.name
-        
-            feature = VoiceProcessor(Config.MODEL_PATH).extract_feature(temp_audio_path)
+        existing_feature.feature_info = parameter.get('featureInfo')
+        existing_feature.feature = pickle.dumps(feature)
+        db.session.commit()
 
-            existing_feature.feature_info = parameter.get('featureInfo')
-            existing_feature.feature = pickle.dumps(feature)
-            
-            db.session.commit()
-
-            message = "success"
-            code = 0
-            text_origin = {"msg":"success"}
-            text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
-            payload = {
-                "createFeatureRes": {
-                    "text": text
-                }
+        message = "success"
+        code = 0
+        text_origin = {"msg": "success"}
+        text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
+        payload = {
+            "updateFeatureRes": {
+                "text": text
             }
-            return build_response(code, message, payload)
-        else:
-            return jsonify({'error': 'Feature not found'}), 500
+        }
+        os.unlink(temp_audio_path)  # 删除临时文件
+        return build_response(code, message, payload)
     except SQLAlchemyError as e:
-        db.rollback()
-        return jsonify({'error': str(e)}), 500
+        db.session.rollback()
+        return build_response(1, f"Database error: {str(e)}", {})
+
+def deleteFeature(data):
+    required_params = ['groupId', 'featureId']
+    error_response = check_required_params(data, required_params)
+    if error_response:
+        return error_response
+
+    try:
+        parameter = data['parameter']['s782b4996']
+        feature = Feature.query.filter_by(
+            group_id=parameter['groupId'],
+            feature_id=parameter['featureId']
+        ).first()
+
+        if not feature:
+            return build_response(1, "Feature not found", {})
+
+        db.session.delete(feature)
+        db.session.commit()
+        message = "success"
+        code = 0
+        text_origin = {"msg": "success"}
+        text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
+        payload = {
+            "deleteFeatureRes": {
+                "text": text
+            }
+        }
+        return build_response(code, message, payload)
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return build_response(1, f"Database error: {str(e)}", {})
+
+def deleteGroup(data):
+    required_params = ['groupId']
+    error_response = check_required_params(data, required_params)
+    if error_response:
+        return error_response
+
+    try:
+        group_id = data['parameter']['s782b4996']['groupId']
+        group = Group.query.filter_by(group_id=group_id).first()
+
+        if not group:
+            return build_response(1, "Group not found", {})
+
+        Feature.query.filter_by(group_id=group_id).delete()
+        db.session.delete(group)
+        db.session.commit()
+        message = "success"
+        code = 0
+        text_origin = {"msg": "success"}
+        text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
+        payload = {
+            "deleteGroupRes": {
+                "text": text
+            }
+        }
+        return build_response(code, message, payload)
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return build_response(1, f"Database error: {str(e)}", {})
     
 def queryGroupList(data):
     try:
@@ -275,61 +351,6 @@ def searchFea(data):
     except SQLAlchemyError as e:
         return jsonify({'error': str(e)}), 500
 
-def deleteFeature(data):
-    try:
-        parameter = data['parameter']['s782b4996']
-        group_id=parameter['groupId']
-        feature_id = parameter['featureId']
-        Feature.query.filter_by(feature_id=feature_id, group_id=group_id).delete()
-        db.session.commit()
-        code = 0
-        message = "success"
-        text_origin = {"msg":"success"}
-        text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
-        payload = {
-            "deleteFeatureRes": {
-                "text": text
-            }
-        }
-        return build_response(code, message, payload)
-    except SQLAlchemyError as e:
-        db.rollback()
-        return jsonify({'error': str(e)}), 500
-
-def deleteGroup(data):
-    try:
-        
-        group_id = data['parameter']['s782b4996']['groupId']
-
-        group = Group.query.filter_by(group_id=group_id).first()
-        if not group:
-            code = 0
-            message = "success"
-            text_origin = {"msg":"no group found"}
-            text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
-            payload = {
-                "deleteGroupRes": {
-                    "text": text
-                }
-            }
-            return build_response(code, message, payload)
-
-        Feature.query.filter_by(group_id=group_id).delete()
-        Group.query.filter_by(group_id=group_id).delete()
-        db.session.commit()
-        code = 0
-        message = "success"
-        text_origin = {"msg":"success"}
-        text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
-        payload = {
-            "deleteGroupRes": {
-                "text": text
-            }
-        }
-        return build_response(code, message, payload)
-    except SQLAlchemyError as e:
-        db.rollback()
-        return jsonify({'error': str(e)}), 500
 
 def searchVector(vector,group_id):
     # 获取指定 group_id 的所有特征
