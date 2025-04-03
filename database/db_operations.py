@@ -26,7 +26,7 @@ def createGroup(data):
         new_group = Group(
             group_id   = parameter['groupId'],
             group_name = parameter['groupName'],
-            group_info = parameter.get('groupInfo')
+            group_info = parameter['groupInfo']
         )
         db.session.add(new_group)
         db.session.commit()
@@ -35,7 +35,7 @@ def createGroup(data):
         text_origin = {
             "groupId": parameter['groupId'],
             "groupName": parameter['groupName'],
-            "groupInfo": parameter.get('groupInfo')
+            "groupInfo": parameter['groupInfo']
         }
         text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
         payload = {
@@ -71,7 +71,7 @@ def createFeature(data):
         new_feature = Feature(
             group_id     = parameter['groupId'],
             feature_id   = parameter['featureId'],
-            feature_info = parameter.get('featureInfo'),
+            feature_info = parameter['featureInfo'],
             feature      = pickle.dumps(feature)
         )
         db.session.add(new_feature)
@@ -82,7 +82,7 @@ def createFeature(data):
         text_origin = {
             "groupId": parameter['groupId'],
             "featureId": parameter['featureId'],
-            "featureInfo": parameter.get('featureInfo')
+            "featureInfo": parameter['featureInfo']
         }
         text = base64.b64encode(json.dumps(text_origin).encode('utf-8')).decode('utf-8')
         payload = {
@@ -125,7 +125,7 @@ def updateFeature(data):
         
             feature = VoiceProcessor(Config.MODEL_PATH).extract_feature(temp_audio_path)
 
-            existing_feature.feature_info = parameter.get('featureInfo')
+            existing_feature.feature_info = parameter['featureInfo']
             existing_feature.feature = pickle.dumps(feature)
             
             db.session.commit()
